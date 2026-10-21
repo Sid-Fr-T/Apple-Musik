@@ -94,13 +94,17 @@ fun HomeScreen(
             }
 
             // "Recently Added" Horizontal Row of Album Cards
-            item {
+            item(key = "header_recently_added", contentType = "header") {
                 LazyRow(
                     contentPadding = PaddingValues(horizontal = 20.dp),
                     horizontalArrangement = Arrangement.spacedBy(14.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    items(recentlyAdded, key = { "recent_added_${it.id}" }) { song ->
+                    items(
+                        items = recentlyAdded,
+                        key = { "recent_added_${it.id}" },
+                        contentType = { "album_card" }
+                    ) { song ->
                         AlbumCardItem(
                             song = song,
                             onClick = { onSongClick(song) }
@@ -110,7 +114,7 @@ fun HomeScreen(
             }
 
             // "Recently Played" Section Header
-            item {
+            item(key = "header_recently_played", contentType = "header") {
                 Spacer(modifier = Modifier.height(28.dp))
                 Text(
                     text = "Recently Played",
@@ -124,7 +128,11 @@ fun HomeScreen(
             }
 
             // "Recently Played" Vertical List
-            items(recentlyPlayed, key = { "recent_played_${it.id}" }) { song ->
+            items(
+                items = recentlyPlayed,
+                key = { "recent_played_${it.id}" },
+                contentType = { "song_row" }
+            ) { song ->
                 RecentlyPlayedRowItem(
                     song = song,
                     onClick = { onSongClick(song) }

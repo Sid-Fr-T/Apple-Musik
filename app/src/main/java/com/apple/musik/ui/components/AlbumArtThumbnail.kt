@@ -1,20 +1,22 @@
 package com.apple.musik.ui.components
 
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import kotlin.math.absoluteValue
 
 // PDF Art Palettes
@@ -35,8 +37,10 @@ fun getArtPaletteFor(seed: String): Pair<Color, Color> {
 }
 
 /**
- * Renders album art: loads via Coil if an image URI is present,
- * otherwise renders the signature abstract dual-circle artwork from the design spec.
+ * Highly optimized album art renderer:
+ * - Uses ImageRequest with crossfade for smooth image loading.
+ * - Draws abstract geometry directly on background via drawBehind,
+ *   reducing Compose layout tree node count for every list item.
  */
 @Composable
 fun AlbumArtThumbnail(
@@ -45,34 +49,44 @@ fun AlbumArtThumbnail(
     modifier: Modifier = Modifier,
     shape: Shape = RoundedCornerShape(10.dp)
 ) {
-    val (primaryColor, circleColor) = getArtPaletteFor(title)
+    val context = LocalContext.current
+    val (primaryColor, circleColor) = remember(title) { getArtPaletteFor(title) }
+    val isRealImage = remember(albumArtUri) {
+        !albumArtUri.isNullOrEmpty() && !albumArtUri.startsWith("content://demo/")
+    }
 
     Box(
         modifier = modifier
             .clip(shape)
             .background(primaryColor)
+            .drawBehind {
+                if (!isRealImage) {
+                    val radius = size.minDimension * 0.65f
+                    val centerOffset = Offset(
+                        x = size.width * 0.85f,
+                        y = size.height * 0.85f
+                    )
+                    drawCircle(
+                        color = circleColor,
+                        radius = radius,
+                        center = centerOffset
+                    )
+                }
+            }
     ) {
-        if (!albumArtUri.isNullOrEmpty() && !albumArtUri.startsWith("content://demo/")) {
+        if (isRealImage) {
+            val imageRequest = remember(albumArtUri) {
+                ImageRequest.Builder(context)
+                    .data(albumArtUri)
+                    .crossfade(200)
+                    .build()
+            }
             AsyncImage(
-                model = albumArtUri,
+                model = imageRequest,
                 contentDescription = title,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize()
             )
-        } else {
-            // Render the PDF's abstract circle composition
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val radius = size.minDimension * 0.65f
-                val centerOffset = Offset(
-                    x = size.width * 0.85f,
-                    y = size.height * 0.85f
-                )
-                drawCircle(
-                    color = circleColor,
-                    radius = radius,
-                    center = centerOffset
-                )
-            }
         }
     }
 }

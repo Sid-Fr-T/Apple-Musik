@@ -9,6 +9,7 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -38,16 +39,17 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -69,7 +71,7 @@ import java.util.Locale
  * - Three equal pill buttons: Play, Shuffle, Sort (Surface #1E1E23, accent text/icon)
  * - Sort button opens dropdown menu (fade + scale in) with: Name (A-Z), Modified Date, Date Added
  * - Song rows: 48dp art, title, artist · album
- * - A-Z fast-scroll index on the right edge
+ * - Interactive A-Z fast-scroll index (tap & drag to scrub through letters)
  */
 @Composable
 fun SongsScreen(
@@ -86,7 +88,7 @@ fun SongsScreen(
     var isSortMenuVisible by remember { mutableStateOf(false) }
 
     // Alphabet fast scroll index mapping
-    val alphabet = ('A'..'Z').toList()
+    val alphabet = remember { ('A'..'Z').toList() }
     val letterPositions = remember(songs) {
         val map = mutableMapOf<Char, Int>()
         songs.forEachIndexed { index, song ->
@@ -101,6 +103,8 @@ fun SongsScreen(
     val formattedSongCount = remember(songs.size) {
         NumberFormat.getNumberInstance(Locale.US).format(songs.size)
     }
+
+    var alphabetHeightPx by remember { mutableFloatStateOf(1f) }
 
     Box(
         modifier = modifier
@@ -216,7 +220,8 @@ fun SongsScreen(
                 ) {
                     itemsIndexed(
                         items = songs,
-                        key = { _, song -> song.id }
+                        key = { _, song -> song.id },
+                        contentType = { _, _ -> "song_row" }
                     ) { _, song ->
                         SongRowItem(
                             song = song,
@@ -225,16 +230,29 @@ fun SongsScreen(
                     }
 
                     // Spacer at bottom so last item is not hidden
-                    item {
+                    item(key = "bottom_spacer", contentType = "spacer") {
                         Spacer(modifier = Modifier.height(16.dp))
                     }
                 }
 
-                // A-Z Fast-Scroll Index on the right edge
+                // Interactive A-Z Fast-Scroll Index (drag or tap)
                 Column(
                     modifier = Modifier
                         .align(Alignment.CenterEnd)
-                        .padding(end = 6.dp),
+                        .padding(end = 4.dp)
+                        .onGloballyPositioned { alphabetHeightPx = it.size.height.toFloat().coerceAtLeast(1f) }
+                        .pointerInput(letterPositions) {
+                            detectVerticalDragGestures { change, _ ->
+                                val y = change.position.y.coerceIn(0f, alphabetHeightPx)
+                                val letterIdx = ((y / alphabetHeightPx) * alphabet.size).toInt().coerceIn(0, alphabet.size - 1)
+                                val touchedLetter = alphabet[letterIdx]
+                                letterPositions[touchedLetter]?.let { targetIndex ->
+                                    coroutineScope.launch {
+                                        listState.scrollToItem(targetIndex)
+                                    }
+                                }
+                            }
+                        },
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
@@ -246,7 +264,7 @@ fun SongsScreen(
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold
                             ),
-                            color = if (hasLetter) AppleMusikTheme.colors.accent else AppleMusikTheme.colors.secondaryText.copy(alpha = 0.5f),
+                            color = if (hasLetter) AppleMusikTheme.colors.accent else AppleMusikTheme.colors.secondaryText.copy(alpha = 0.4f),
                             modifier = Modifier
                                 .padding(vertical = 1.dp)
                                 .clickable(

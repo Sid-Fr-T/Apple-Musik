@@ -234,7 +234,11 @@ fun SearchScreen(
                     )
                 }
 
-                items(filteredSongs) { song ->
+                items(
+                    items = filteredSongs,
+                    key = { "search_${it.id}" },
+                    contentType = { "search_song_row" }
+                ) { song ->
                     RecentlyPlayedRowItem(
                         song = song,
                         onClick = { onSongClick(song) }

@@ -18,6 +18,7 @@
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
+        android:enableOnBackInvokedCallback="true"
         android:theme="@style/Theme.AppleMusik">
         <activity
             android:name=".MainActivity"
@@ -38,8 +39,17 @@
             android:foregroundServiceType="mediaPlayback">
             <intent-filter>
                 <action android:name="androidx.media3.session.MediaSessionService" />
+                <action android:name="android.intent.action.MEDIA_BUTTON" />
             </intent-filter>
         </service>
+
+        <receiver
+            android:name="androidx.media3.session.MediaButtonReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MEDIA_BUTTON" />
+            </intent-filter>
+        </receiver>
     </application>
 
 </manifest>

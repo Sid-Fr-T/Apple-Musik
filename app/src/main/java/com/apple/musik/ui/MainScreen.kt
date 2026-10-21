@@ -4,10 +4,13 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionLayout
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -89,10 +92,23 @@ fun MainScreen(
     // Default song fallback for preview / initial state
     val activeSong = currentSong ?: songs.firstOrNull { it.title == "Slow Bloom" } ?: songs.firstOrNull()
 
+    val notificationLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { /* result handled */ }
+
     // Check system permission on launch
     LaunchedEffect(Unit) {
         if (hasSystemPermission) {
             musicViewModel.updatePermissionStatus(true)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val hasNotificationPermission = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!hasNotificationPermission) {
+                notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+            }
         }
     }
 
@@ -118,22 +134,26 @@ fun MainScreen(
                 targetState = isNowPlayingExpanded,
                 transitionSpec = {
                     if (targetState) {
-                        // Expanding: slide up from bottom + fade in
                         (slideInVertically(
-                            animationSpec = tween(380),
+                            animationSpec = spring(
+                                dampingRatio = 0.82f,
+                                stiffness = 380f
+                            ),
                             initialOffsetY = { it }
-                        ) + fadeIn(tween(320)))
+                        ) + fadeIn(tween(280)))
                             .togetherWith(
-                                fadeOut(tween(200))
+                                fadeOut(tween(180))
                             )
                     } else {
-                        // Collapsing: slide down to bottom + fade out
-                        fadeIn(tween(250))
+                        fadeIn(tween(220))
                             .togetherWith(
                                 slideOutVertically(
-                                    animationSpec = tween(320),
+                                    animationSpec = spring(
+                                        dampingRatio = 0.85f,
+                                        stiffness = 380f
+                                    ),
                                     targetOffsetY = { it }
-                                ) + fadeOut(tween(250))
+                                ) + fadeOut(tween(220))
                             )
                     }
                 },

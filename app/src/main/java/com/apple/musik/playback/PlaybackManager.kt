@@ -55,6 +55,7 @@ class PlaybackManager private constructor(private val context: Context) {
 
     private var progressJob: Job? = null
     private var isSimulatingDemoPlayback = false
+    private var codecRetryCount = 0
 
     companion object {
         @Volatile
@@ -83,6 +84,7 @@ class PlaybackManager private constructor(private val context: Context) {
             when (playbackState) {
                 Player.STATE_READY -> {
                     isSimulatingDemoPlayback = false
+                    codecRetryCount = 0
                     val dur = exoPlayer?.duration ?: 0L
                     if (dur > 0) {
                         _totalDuration.value = dur
@@ -96,9 +98,56 @@ class PlaybackManager private constructor(private val context: Context) {
         }
 
         override fun onPlayerError(error: PlaybackException) {
-            Log.w("PlaybackManager", "ExoPlayer playback error, falling back to simulated playback: ${error.message}")
-            // For demo URIs or missing local files, simulate playback smoothly
-            startSimulatedPlayback()
+            val errorMsg = error.message.orEmpty()
+            val causeMsg = error.cause?.message.orEmpty()
+            val isCodecError = error.errorCode == PlaybackException.ERROR_CODE_DECODER_INIT_FAILED ||
+                    error.errorCode == PlaybackException.ERROR_CODE_DECODER_QUERY_FAILED ||
+                    errorMsg.contains("MediaCodecAudioRenderer") ||
+                    errorMsg.contains("c2.android") ||
+                    causeMsg.contains("c2.android") ||
+                    causeMsg.contains("DEAD_OBJECT") ||
+                    error.cause is IllegalStateException
+
+            if (isCodecError && codecRetryCount < 3) {
+                codecRetryCount++
+                val resumePos = _currentPosition.value
+                val currentSong = _currentSong.value
+                Log.w("PlaybackManager", "Audio decoder failure ($errorMsg). Auto-recovering (attempt $codecRetryCount) at ${resumePos}ms...")
+
+                scope.launch {
+                    try {
+                        exoPlayer?.stop()
+                        exoPlayer?.clearMediaItems()
+                        delay(300)
+                        if (currentSong != null) {
+                            prepareAndPlaySong(currentSong, playWhenReady = true)
+                            if (resumePos > 0) {
+                                exoPlayer?.seekTo(resumePos)
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.e("PlaybackManager", "Decoder recovery failed: ${e.message}", e)
+                        startSimulatedPlayback()
+                    }
+                }
+            } else {
+                codecRetryCount = 0
+                Log.w("PlaybackManager", "ExoPlayer playback error, falling back to simulated playback: $errorMsg")
+                startSimulatedPlayback()
+            }
+        }
+
+        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            mediaItem?.let { item ->
+                val songId = item.mediaId.toLongOrNull()
+                val matchedSong = _queue.value.firstOrNull { it.id == songId }
+                if (matchedSong != null) {
+                    _currentSong.value = matchedSong
+                    currentIndex = _queue.value.indexOfFirst { it.id == matchedSong.id }
+                    _totalDuration.value = matchedSong.duration
+                    _currentPosition.value = 0L
+                }
+            }
         }
 
         override fun onShuffleModeEnabledChanged(shuffleModeEnabled: Boolean) {
@@ -130,11 +179,9 @@ class PlaybackManager private constructor(private val context: Context) {
     private fun ensureServiceRunning() {
         try {
             val intent = Intent(context, PlaybackService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                ContextCompat.startForegroundService(context, intent)
-            } else {
-                context.startService(intent)
-            }
+            // Use standard startService so MediaSessionService manages its own foreground lifecycle
+            // without triggering Android's strict 30-second startForegroundService() timeout.
+            context.startService(intent)
         } catch (e: Exception) {
             Log.e("PlaybackManager", "Error starting PlaybackService", e)
         }
@@ -180,6 +227,21 @@ class PlaybackManager private constructor(private val context: Context) {
         playSong(shuffled.first(), shuffled)
     }
 
+    private fun toMediaItem(song: SongEntity): MediaItem {
+        val metadata = MediaMetadata.Builder()
+            .setTitle(song.title)
+            .setArtist(song.artist)
+            .setAlbumTitle(song.album)
+            .setArtworkUri(song.albumArtUri?.let { Uri.parse(it) })
+            .build()
+
+        return MediaItem.Builder()
+            .setMediaId(song.id.toString())
+            .setUri(Uri.parse(song.uri))
+            .setMediaMetadata(metadata)
+            .build()
+    }
+
     private fun prepareAndPlaySong(song: SongEntity, playWhenReady: Boolean) {
         _currentSong.value = song
         _totalDuration.value = song.duration
@@ -193,21 +255,13 @@ class PlaybackManager private constructor(private val context: Context) {
         }
 
         try {
-            val metadata = MediaMetadata.Builder()
-                .setTitle(song.title)
-                .setArtist(song.artist)
-                .setAlbumTitle(song.album)
-                .setArtworkUri(song.albumArtUri?.let { Uri.parse(it) })
-                .build()
-
-            val mediaItem = MediaItem.Builder()
-                .setMediaId(song.id.toString())
-                .setUri(Uri.parse(song.uri))
-                .setMediaMetadata(metadata)
-                .build()
+            val q = _queue.value
+            val playableQueue = if (q.isNotEmpty()) q else listOf(song)
+            val mediaItems = playableQueue.map { toMediaItem(it) }
+            val targetIdx = playableQueue.indexOfFirst { it.id == song.id }.coerceAtLeast(0)
 
             exoPlayer?.apply {
-                setMediaItem(mediaItem)
+                setMediaItems(mediaItems, targetIdx, 0L)
                 prepare()
                 this.playWhenReady = playWhenReady
             }
@@ -236,8 +290,8 @@ class PlaybackManager private constructor(private val context: Context) {
                         _totalDuration.value = dur
                     }
                 } else {
-                    // Demo simulation tick
-                    val newPos = _currentPosition.value + 500L
+                    // Demo simulation tick (smooth 200ms increments)
+                    val newPos = _currentPosition.value + 200L
                     val total = _totalDuration.value.takeIf { it > 0 } ?: 200_000L
                     if (newPos >= total) {
                         _currentPosition.value = total
@@ -247,7 +301,7 @@ class PlaybackManager private constructor(private val context: Context) {
                         _currentPosition.value = newPos
                     }
                 }
-                delay(500)
+                delay(200)
             }
         }
     }
@@ -303,9 +357,13 @@ class PlaybackManager private constructor(private val context: Context) {
     fun skipToNext() {
         val q = _queue.value
         if (q.isEmpty()) return
-        val nextIndex = (currentIndex + 1) % q.size
-        currentIndex = nextIndex
-        playSong(q[nextIndex], q)
+        if (exoPlayer != null && !isSimulatingDemoPlayback && exoPlayer?.hasNextMediaItem() == true) {
+            exoPlayer?.seekToNextMediaItem()
+        } else {
+            val nextIndex = (currentIndex + 1) % q.size
+            currentIndex = nextIndex
+            playSong(q[nextIndex], q)
+        }
     }
 
     fun skipToPrevious() {
@@ -316,9 +374,13 @@ class PlaybackManager private constructor(private val context: Context) {
             seekTo(0L)
             return
         }
-        val prevIndex = if (currentIndex - 1 < 0) q.size - 1 else currentIndex - 1
-        currentIndex = prevIndex
-        playSong(q[prevIndex], q)
+        if (exoPlayer != null && !isSimulatingDemoPlayback && exoPlayer?.hasPreviousMediaItem() == true) {
+            exoPlayer?.seekToPreviousMediaItem()
+        } else {
+            val prevIndex = if (currentIndex - 1 < 0) q.size - 1 else currentIndex - 1
+            currentIndex = prevIndex
+            playSong(q[prevIndex], q)
+        }
     }
 
     fun seekTo(positionMs: Long) {

@@ -46,16 +46,24 @@ fun PermissionScreen(
     onSkip: () -> Unit = onPermissionGranted,
     modifier: Modifier = Modifier
 ) {
-    val permissionToRequest = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        Manifest.permission.READ_MEDIA_AUDIO
+    val permissionsToRequest = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        arrayOf(
+            Manifest.permission.READ_MEDIA_AUDIO,
+            Manifest.permission.POST_NOTIFICATIONS
+        )
     } else {
-        Manifest.permission.READ_EXTERNAL_STORAGE
+        arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
     }
 
     val launcher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission()
-    ) { isGranted ->
-        if (isGranted) {
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { results ->
+        val storageGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            results[Manifest.permission.READ_MEDIA_AUDIO] == true
+        } else {
+            results[Manifest.permission.READ_EXTERNAL_STORAGE] == true
+        }
+        if (storageGranted) {
             onPermissionGranted()
         }
     }
@@ -118,7 +126,7 @@ fun PermissionScreen(
             Spacer(modifier = Modifier.height(40.dp))
 
             Button(
-                onClick = { launcher.launch(permissionToRequest) },
+                onClick = { launcher.launch(permissionsToRequest) },
                 shape = RoundedCornerShape(percent = 50),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = AppleMusikTheme.colors.accent,

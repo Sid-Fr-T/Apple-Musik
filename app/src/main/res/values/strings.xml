@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">Apple Musik</string>
+    <string name="notification_channel_name">Playback Controls</string>
 </resources>

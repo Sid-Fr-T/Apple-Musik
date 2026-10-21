@@ -5,9 +5,12 @@ import android.media.AudioManager
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
-import androidx.compose.foundation.Canvas
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -39,8 +42,6 @@ import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -48,15 +49,18 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -67,16 +71,16 @@ import com.apple.musik.data.local.SongEntity
 import com.apple.musik.ui.components.AlbumArtThumbnail
 import com.apple.musik.ui.theme.AppleMusikTheme
 import com.apple.musik.ui.theme.rememberArtworkDominantColor
+import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 /**
  * Now Playing Screen strictly adhering to Page 2 of the PDF design:
- * - Ambient background tinted with Palette (blurred color blob + dark base)
- * - Top pull-down handle bar (swipe down to collapse)
- * - Large rounded album art with soft shadow
- * - Hero animation via SharedTransitionLayout
+ * - Fluid spring-based pull-down handle gesture
+ * - Cached ambient background glow via Palette
+ * - Large rounded album art with soft shadow & Hero animation
  * - Title, artist, and "..." menu button
- * - Thin scrubber with elapsed and negative remaining time (-mm:ss)
+ * - Sleek thin scrubber with elapsed and negative remaining time (-mm:ss)
  * - Big playback controls (Previous, Play/Pause, Next)
  * - Volume slider with speaker low & high icons
  * - Bottom row: Lyrics button, "On device · FLAC" chip, Queue button
@@ -98,6 +102,8 @@ fun NowPlayingScreen(
     animatedVisibilityScope: AnimatedVisibilityScope? = null
 ) {
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+
     val title = song?.title ?: "Slow Bloom"
     val artist = song?.artist ?: "Aria Vale"
     val albumArtUri = song?.albumArtUri
@@ -108,8 +114,19 @@ fun NowPlayingScreen(
         albumArtUri = albumArtUri
     )
 
-    // Vertical drag gesture to collapse
-    var offsetY by remember { mutableFloatStateOf(0f) }
+    // Cached ambient glow brush
+    val radialGlowBrush = remember(dominantColor) {
+        Brush.radialGradient(
+            colors = listOf(
+                dominantColor.copy(alpha = 0.55f),
+                dominantColor.copy(alpha = 0.22f),
+                Color.Transparent
+            )
+        )
+    }
+
+    // Spring-animated vertical drag-to-dismiss gesture
+    val dragAnimatable = remember { Animatable(0f) }
 
     // Volume state via AudioManager
     val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
@@ -121,48 +138,55 @@ fun NowPlayingScreen(
     var isDraggingScrubber by remember { mutableStateOf(false) }
     var dragPositionMs by remember { mutableFloatStateOf(0f) }
 
-    val effectivePosition = if (isDraggingScrubber) dragPositionMs.toLong() else currentPosition
     val duration = totalDuration.takeIf { it > 0 } ?: (song?.duration?.takeIf { it > 0 } ?: 201_000L)
+    val effectivePosition = if (isDraggingScrubber) dragPositionMs.toLong() else currentPosition
     val progressFraction = (effectivePosition.toFloat() / duration.toFloat()).coerceIn(0f, 1f)
     val remainingMs = (duration - effectivePosition).coerceAtLeast(0L)
 
     Box(
         modifier = modifier
             .fillMaxSize()
-            .offset { IntOffset(0, offsetY.roundToInt().coerceAtLeast(0)) }
+            .offset { IntOffset(0, dragAnimatable.value.roundToInt().coerceAtLeast(0)) }
             .pointerInput(Unit) {
                 detectVerticalDragGestures(
                     onDragEnd = {
-                        if (offsetY > 120f) {
+                        if (dragAnimatable.value > 130f) {
                             onCollapse()
+                        } else {
+                            coroutineScope.launch {
+                                dragAnimatable.animateTo(
+                                    targetValue = 0f,
+                                    animationSpec = spring(
+                                        dampingRatio = 0.8f,
+                                        stiffness = 450f
+                                    )
+                                )
+                            }
                         }
-                        offsetY = 0f
                     },
-                    onDragCancel = { offsetY = 0f },
+                    onDragCancel = {
+                        coroutineScope.launch {
+                            dragAnimatable.animateTo(0f, spring(0.8f, 450f))
+                        }
+                    },
                     onVerticalDrag = { _, dragAmount ->
-                        if (dragAmount > 0 || offsetY > 0) {
-                            offsetY = (offsetY + dragAmount).coerceAtLeast(0f)
+                        if (dragAmount > 0 || dragAnimatable.value > 0) {
+                            coroutineScope.launch {
+                                dragAnimatable.snapTo((dragAnimatable.value + dragAmount).coerceAtLeast(0f))
+                            }
                         }
                     }
                 )
             }
             .background(AppleMusikTheme.colors.background)
-    ) {
-        // Blurred Color Blob from Palette on top of dark base
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            drawCircle(
-                brush = Brush.radialGradient(
-                    colors = listOf(
-                        dominantColor.copy(alpha = 0.55f),
-                        dominantColor.copy(alpha = 0.22f),
-                        Color.Transparent
-                    ),
+            .drawBehind {
+                drawCircle(
+                    brush = radialGlowBrush,
                     center = Offset(size.width * 0.5f, size.height * 0.28f),
                     radius = size.width * 0.95f
                 )
-            )
-        }
-
+            }
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -272,26 +296,25 @@ fun NowPlayingScreen(
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            // Thin Scrubber Progress Bar
-            Slider(
-                value = progressFraction,
-                onValueChange = { frac ->
+            // Custom Smooth Thin Scrubber Progress Bar
+            CustomThinProgressBar(
+                progressFraction = progressFraction,
+                onSeekFraction = { frac ->
+                    val newMs = (frac * duration).toLong()
+                    onSeek(newMs)
+                },
+                onDragFraction = { frac ->
                     isDraggingScrubber = true
                     dragPositionMs = frac * duration
                 },
-                onValueChangeFinished = {
+                onDragFinished = {
                     onSeek(dragPositionMs.toLong())
                     isDraggingScrubber = false
                 },
-                colors = SliderDefaults.colors(
-                    thumbColor = Color.White,
-                    activeTrackColor = Color.White,
-                    inactiveTrackColor = Color.White.copy(alpha = 0.22f)
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(20.dp)
+                modifier = Modifier.fillMaxWidth()
             )
+
+            Spacer(modifier = Modifier.height(6.dp))
 
             // Scrubber Time Labels: Elapsed (left) and Remaining (right with negative sign)
             Row(
@@ -371,22 +394,22 @@ fun NowPlayingScreen(
                     modifier = Modifier.size(20.dp)
                 )
 
-                Slider(
-                    value = volumeFraction,
-                    onValueChange = { frac ->
+                CustomThinProgressBar(
+                    progressFraction = volumeFraction,
+                    onSeekFraction = { frac ->
                         volumeFraction = frac
                         val targetVol = (frac * maxVolume).roundToInt()
                         audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, targetVol, 0)
                     },
-                    colors = SliderDefaults.colors(
-                        thumbColor = Color.White,
-                        activeTrackColor = Color.White,
-                        inactiveTrackColor = Color.White.copy(alpha = 0.22f)
-                    ),
+                    onDragFraction = { frac ->
+                        volumeFraction = frac
+                        val targetVol = (frac * maxVolume).roundToInt()
+                        audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, targetVol, 0)
+                    },
+                    onDragFinished = {},
                     modifier = Modifier
                         .weight(1f)
                         .padding(horizontal = 14.dp)
-                        .height(18.dp)
                 )
 
                 Icon(
@@ -447,6 +470,65 @@ fun NowPlayingScreen(
                 }
             }
         }
+    }
+}
+
+/**
+ * Custom thin progress bar (Apple Music style: thin, tactile, smooth dragging).
+ */
+@Composable
+fun CustomThinProgressBar(
+    progressFraction: Float,
+    onSeekFraction: (Float) -> Unit,
+    onDragFraction: (Float) -> Unit,
+    onDragFinished: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var widthPx by remember { mutableFloatStateOf(1f) }
+
+    Box(
+        modifier = modifier
+            .height(28.dp)
+            .onGloballyPositioned { widthPx = it.size.width.toFloat().coerceAtLeast(1f) }
+            .pointerInput(Unit) {
+                detectTapGestures { offset ->
+                    val frac = (offset.x / widthPx).coerceIn(0f, 1f)
+                    onSeekFraction(frac)
+                }
+            }
+            .pointerInput(Unit) {
+                detectHorizontalDragGestures(
+                    onDragStart = { offset ->
+                        val frac = (offset.x / widthPx).coerceIn(0f, 1f)
+                        onDragFraction(frac)
+                    },
+                    onDragEnd = { onDragFinished() },
+                    onDragCancel = { onDragFinished() },
+                    onHorizontalDrag = { change, _ ->
+                        val frac = (change.position.x / widthPx).coerceIn(0f, 1f)
+                        onDragFraction(frac)
+                    }
+                )
+            },
+        contentAlignment = Alignment.CenterStart
+    ) {
+        // Track Background
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(4.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(Color.White.copy(alpha = 0.22f))
+        )
+
+        // Active Track
+        Box(
+            modifier = Modifier
+                .fillMaxWidth(fraction = progressFraction)
+                .height(4.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(Color.White)
+        )
     }
 }
 
