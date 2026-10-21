@@ -1,8 +1,6 @@
 package com.apple.musik.ui.components
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,11 +13,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.GraphicEq
-import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.SkipNext
+import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -32,7 +29,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -43,17 +39,19 @@ import com.apple.musik.ui.theme.AppleMusikTheme
 /**
  * Floating mini player bar (60dp high, 16dp side margins, radius 16dp, color #212126).
  * Sits directly above the bottom tab bar.
- * Hardcoded with fake data: art, title, artist, pause and next buttons.
+ * Controls: Previous, Play/Pause, Next (total 3 buttons).
  */
 @Composable
 fun MiniPlayerBar(
     modifier: Modifier = Modifier,
-    title: String = "Starboy",
-    artist: String = "The Weeknd ft. Daft Punk",
+    title: String = "Slow Bloom",
+    artist: String = "Aria Vale",
+    albumArtUri: String? = null,
+    onPreviousClick: () -> Unit = {},
     onPlayPauseClick: () -> Unit = {},
     onNextClick: () -> Unit = {}
 ) {
-    var isPlaying by remember { mutableStateOf(true) }
+    var isPlaying by remember { mutableStateOf(false) }
 
     Box(
         modifier = modifier
@@ -68,36 +66,20 @@ fun MiniPlayerBar(
             )
             .clip(RoundedCornerShape(16.dp))
             .background(Color(0xFF212126))
-            .padding(horizontal = 10.dp),
+            .padding(start = 10.dp, end = 6.dp),
         contentAlignment = Alignment.CenterStart
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Fake Album Artwork
-            Box(
-                modifier = Modifier
-                    .size(42.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(
-                        Brush.linearGradient(
-                            colors = listOf(
-                                Color(0xFFFF5A3C),
-                                Color(0xFF8B2515),
-                                Color(0xFF17171B)
-                            )
-                        )
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.MusicNote,
-                    contentDescription = "Album Art",
-                    tint = Color.White.copy(alpha = 0.9f),
-                    modifier = Modifier.size(22.dp)
-                )
-            }
+            // Album Artwork matching the PDF
+            AlbumArtThumbnail(
+                albumArtUri = albumArtUri,
+                title = title,
+                modifier = Modifier.size(42.dp),
+                shape = RoundedCornerShape(8.dp)
+            )
 
             Spacer(modifier = Modifier.width(12.dp))
 
@@ -128,13 +110,25 @@ fun MiniPlayerBar(
                 )
             }
 
-            // Controls: Pause and Next buttons
+            // Controls: Previous, Play/Pause, Next (Total 3 buttons)
+            IconButton(
+                onClick = onPreviousClick,
+                modifier = Modifier.size(36.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.SkipPrevious,
+                    contentDescription = "Previous Track",
+                    tint = AppleMusikTheme.colors.primaryText,
+                    modifier = Modifier.size(22.dp)
+                )
+            }
+
             IconButton(
                 onClick = {
                     isPlaying = !isPlaying
                     onPlayPauseClick()
                 },
-                modifier = Modifier.size(38.dp)
+                modifier = Modifier.size(36.dp)
             ) {
                 Icon(
                     imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
@@ -146,13 +140,13 @@ fun MiniPlayerBar(
 
             IconButton(
                 onClick = onNextClick,
-                modifier = Modifier.size(38.dp)
+                modifier = Modifier.size(36.dp)
             ) {
                 Icon(
                     imageVector = Icons.Rounded.SkipNext,
                     contentDescription = "Next Track",
                     tint = AppleMusikTheme.colors.primaryText,
-                    modifier = Modifier.size(24.dp)
+                    modifier = Modifier.size(22.dp)
                 )
             }
         }
