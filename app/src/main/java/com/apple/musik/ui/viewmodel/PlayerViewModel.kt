@@ -53,4 +53,12 @@ class PlayerViewModel(application: Application) : AndroidViewModel(application) 
     fun toggleRepeat() {
         playbackManager.toggleRepeat()
     }
+
+    fun removeFromQueue(songId: Long) {
+        playbackManager.removeFromQueue(songId)
+    }
+
+    fun reorderQueue(fromIndex: Int, toIndex: Int) {
+        playbackManager.reorderQueue(fromIndex, toIndex)
+    }
 }

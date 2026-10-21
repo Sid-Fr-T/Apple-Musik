@@ -97,6 +97,8 @@ fun NowPlayingScreen(
     onNextClick: () -> Unit,
     onSeek: (Long) -> Unit,
     onCollapse: () -> Unit,
+    onQueueClick: () -> Unit = {},
+    isQueueOpen: Boolean = false,
     modifier: Modifier = Modifier,
     sharedTransitionScope: SharedTransitionScope? = null,
     animatedVisibilityScope: AnimatedVisibilityScope? = null
@@ -460,11 +462,11 @@ fun NowPlayingScreen(
                     }
                 }
 
-                IconButton(onClick = {}) {
+                IconButton(onClick = onQueueClick) {
                     Icon(
                         imageVector = Icons.AutoMirrored.Rounded.QueueMusic,
                         contentDescription = "Queue",
-                        tint = AppleMusikTheme.colors.secondaryText,
+                        tint = if (isQueueOpen) AppleMusikTheme.colors.accent else AppleMusikTheme.colors.secondaryText,
                         modifier = Modifier.size(24.dp)
                     )
                 }

@@ -7,6 +7,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionLayout
@@ -43,6 +44,7 @@ import com.apple.musik.ui.screens.HomeScreen
 import com.apple.musik.ui.screens.LibraryScreen
 import com.apple.musik.ui.screens.NowPlayingScreen
 import com.apple.musik.ui.screens.PermissionScreen
+import com.apple.musik.ui.screens.QueueScreen
 import com.apple.musik.ui.screens.SearchScreen
 import com.apple.musik.ui.theme.AppleMusikTheme
 import com.apple.musik.ui.viewmodel.MusicViewModel
@@ -65,6 +67,7 @@ fun MainScreen(
     val context = LocalContext.current
     var selectedTab by remember { mutableStateOf(NavigationTab.Home) }
     var isNowPlayingExpanded by remember { mutableStateOf(false) }
+    var isQueueOpen by remember { mutableStateOf(false) }
 
     val permissionToTest = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         Manifest.permission.READ_MEDIA_AUDIO
@@ -88,6 +91,9 @@ fun MainScreen(
     val isPlaying by playerViewModel.isPlaying.collectAsState()
     val currentPosition by playerViewModel.position.collectAsState()
     val totalDuration by playerViewModel.duration.collectAsState()
+    val queue by playerViewModel.queue.collectAsState()
+    val shuffleModeEnabled by playerViewModel.shuffleModeEnabled.collectAsState()
+    val repeatMode by playerViewModel.repeatMode.collectAsState()
 
     // Default song fallback for preview / initial state
     val activeSong = currentSong ?: songs.firstOrNull { it.title == "Slow Bloom" } ?: songs.firstOrNull()
@@ -112,8 +118,12 @@ fun MainScreen(
         }
     }
 
-    // Collapse Now Playing on system back button
-    BackHandler(enabled = isNowPlayingExpanded) {
+    // Back handling: Queue collapses first, then Now Playing
+    BackHandler(enabled = isQueueOpen) {
+        isQueueOpen = false
+    }
+
+    BackHandler(enabled = isNowPlayingExpanded && !isQueueOpen) {
         isNowPlayingExpanded = false
     }
 
@@ -160,20 +170,67 @@ fun MainScreen(
                 label = "NowPlayingHeroTransition"
             ) { expanded ->
                 if (expanded) {
-                    NowPlayingScreen(
-                        song = activeSong,
-                        isPlaying = isPlaying,
-                        currentPosition = currentPosition,
-                        totalDuration = totalDuration,
-                        onPlayPauseClick = { playerViewModel.togglePlayPause() },
-                        onPreviousClick = { playerViewModel.skipToPrevious() },
-                        onNextClick = { playerViewModel.skipToNext() },
-                        onSeek = { playerViewModel.seekTo(it) },
-                        onCollapse = { isNowPlayingExpanded = false },
-                        sharedTransitionScope = this@SharedTransitionLayout,
-                        animatedVisibilityScope = this@AnimatedContent,
-                        modifier = Modifier.fillMaxSize()
-                    )
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        NowPlayingScreen(
+                            song = activeSong,
+                            isPlaying = isPlaying,
+                            currentPosition = currentPosition,
+                            totalDuration = totalDuration,
+                            onPlayPauseClick = { playerViewModel.togglePlayPause() },
+                            onPreviousClick = { playerViewModel.skipToPrevious() },
+                            onNextClick = { playerViewModel.skipToNext() },
+                            onSeek = { playerViewModel.seekTo(it) },
+                            onCollapse = {
+                                isQueueOpen = false
+                                isNowPlayingExpanded = false
+                            },
+                            onQueueClick = { isQueueOpen = !isQueueOpen },
+                            isQueueOpen = isQueueOpen,
+                            sharedTransitionScope = this@SharedTransitionLayout,
+                            animatedVisibilityScope = this@AnimatedContent,
+                            modifier = Modifier.fillMaxSize()
+                        )
+
+                        // Animated Queue Screen overlay with smooth vertical spring slide
+                        AnimatedVisibility(
+                            visible = isQueueOpen,
+                            enter = slideInVertically(
+                                initialOffsetY = { it },
+                                animationSpec = spring(
+                                    dampingRatio = 0.85f,
+                                    stiffness = 380f
+                                )
+                            ) + fadeIn(tween(200)),
+                            exit = slideOutVertically(
+                                targetOffsetY = { it },
+                                animationSpec = spring(
+                                    dampingRatio = 0.85f,
+                                    stiffness = 380f
+                                )
+                            ) + fadeOut(tween(200))
+                        ) {
+                            QueueScreen(
+                                currentSong = activeSong,
+                                queue = queue,
+                                isPlaying = isPlaying,
+                                shuffleModeEnabled = shuffleModeEnabled,
+                                repeatMode = repeatMode,
+                                onSongClick = { song ->
+                                    playerViewModel.playSong(song)
+                                },
+                                onRemoveFromQueue = { songId ->
+                                    playerViewModel.removeFromQueue(songId)
+                                },
+                                onReorderQueue = { fromIndex, toIndex ->
+                                    playerViewModel.reorderQueue(fromIndex, toIndex)
+                                },
+                                onToggleShuffle = { playerViewModel.toggleShuffle() },
+                                onToggleRepeat = { playerViewModel.toggleRepeat() },
+                                onDismiss = { isQueueOpen = false },
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
+                    }
                 } else {
                     Box(
                         modifier = modifier

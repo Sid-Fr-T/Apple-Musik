@@ -420,4 +420,46 @@ class PlaybackManager private constructor(private val context: Context) {
         _repeatMode.value = nextMode
         exoPlayer?.repeatMode = nextMode
     }
+
+    fun removeFromQueue(songId: Long) {
+        val currentQ = _queue.value.toMutableList()
+        val index = currentQ.indexOfFirst { it.id == songId }
+        if (index != -1) {
+            val isCurrentTrack = currentIndex == index
+            currentQ.removeAt(index)
+            _queue.value = currentQ
+
+            if (exoPlayer != null && !isSimulatingDemoPlayback && index < (exoPlayer?.mediaItemCount ?: 0)) {
+                exoPlayer?.removeMediaItem(index)
+            }
+
+            if (isCurrentTrack) {
+                if (currentQ.isNotEmpty()) {
+                    val nextIndex = index.coerceIn(0, currentQ.size - 1)
+                    currentIndex = nextIndex
+                    playSong(currentQ[nextIndex], currentQ)
+                } else {
+                    _currentSong.value = null
+                    currentIndex = -1
+                    pause()
+                }
+            } else {
+                currentIndex = currentQ.indexOfFirst { it.id == _currentSong.value?.id }
+            }
+        }
+    }
+
+    fun reorderQueue(fromIndex: Int, toIndex: Int) {
+        val currentQ = _queue.value.toMutableList()
+        if (fromIndex in currentQ.indices && toIndex in currentQ.indices && fromIndex != toIndex) {
+            val item = currentQ.removeAt(fromIndex)
+            currentQ.add(toIndex, item)
+            _queue.value = currentQ
+
+            if (exoPlayer != null && !isSimulatingDemoPlayback) {
+                exoPlayer?.moveMediaItem(fromIndex, toIndex)
+            }
+            currentIndex = currentQ.indexOfFirst { it.id == _currentSong.value?.id }
+        }
+    }
 }
