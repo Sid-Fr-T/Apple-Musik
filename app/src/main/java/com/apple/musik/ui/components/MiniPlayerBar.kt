@@ -1,6 +1,11 @@
 package com.apple.musik.ui.components
 
+import androidx.compose.animation.AnimatedVisibilityScope
+import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,10 +26,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -34,24 +36,32 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.apple.musik.data.local.SongEntity
 import com.apple.musik.ui.theme.AppleMusikTheme
 
 /**
  * Floating mini player bar (60dp high, 16dp side margins, radius 16dp, color #212126).
  * Sits directly above the bottom tab bar.
  * Controls: Previous, Play/Pause, Next (total 3 buttons).
+ * Supports SharedTransitionLayout Hero animation on artwork.
+ * Tapping expands into Now Playing screen.
  */
+@OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 fun MiniPlayerBar(
+    song: SongEntity?,
+    isPlaying: Boolean,
+    onPreviousClick: () -> Unit,
+    onPlayPauseClick: () -> Unit,
+    onNextClick: () -> Unit,
+    onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    title: String = "Slow Bloom",
-    artist: String = "Aria Vale",
-    albumArtUri: String? = null,
-    onPreviousClick: () -> Unit = {},
-    onPlayPauseClick: () -> Unit = {},
-    onNextClick: () -> Unit = {}
+    sharedTransitionScope: SharedTransitionScope? = null,
+    animatedVisibilityScope: AnimatedVisibilityScope? = null
 ) {
-    var isPlaying by remember { mutableStateOf(false) }
+    val title = song?.title ?: "Slow Bloom"
+    val artist = song?.artist ?: "Aria Vale"
+    val albumArtUri = song?.albumArtUri
 
     Box(
         modifier = modifier
@@ -66,6 +76,11 @@ fun MiniPlayerBar(
             )
             .clip(RoundedCornerShape(16.dp))
             .background(Color(0xFF212126))
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick
+            )
             .padding(start = 10.dp, end = 6.dp),
         contentAlignment = Alignment.CenterStart
     ) {
@@ -73,13 +88,30 @@ fun MiniPlayerBar(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Album Artwork matching the PDF
-            AlbumArtThumbnail(
-                albumArtUri = albumArtUri,
-                title = title,
-                modifier = Modifier.size(42.dp),
-                shape = RoundedCornerShape(8.dp)
-            )
+            // Hero Animation on Album Artwork
+            val heroArtModifier = if (sharedTransitionScope != null && animatedVisibilityScope != null) {
+                with(sharedTransitionScope) {
+                    Modifier.sharedElement(
+                        sharedContentState = rememberSharedContentState(key = "now_playing_art_${song?.id ?: 0}"),
+                        animatedVisibilityScope = animatedVisibilityScope
+                    )
+                }
+            } else {
+                Modifier
+            }
+
+            Box(
+                modifier = Modifier
+                    .size(42.dp)
+                    .then(heroArtModifier)
+            ) {
+                AlbumArtThumbnail(
+                    albumArtUri = albumArtUri,
+                    title = title,
+                    modifier = Modifier.size(42.dp),
+                    shape = RoundedCornerShape(8.dp)
+                )
+            }
 
             Spacer(modifier = Modifier.width(12.dp))
 
@@ -124,10 +156,7 @@ fun MiniPlayerBar(
             }
 
             IconButton(
-                onClick = {
-                    isPlaying = !isPlaying
-                    onPlayPauseClick()
-                },
+                onClick = onPlayPauseClick,
                 modifier = Modifier.size(36.dp)
             ) {
                 Icon(

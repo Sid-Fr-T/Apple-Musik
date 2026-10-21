@@ -3,7 +3,17 @@ package com.apple.musik.ui
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.SharedTransitionLayout
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,31 +33,35 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.apple.musik.data.local.SongEntity
 import com.apple.musik.ui.components.BottomTabBar
 import com.apple.musik.ui.components.MiniPlayerBar
 import com.apple.musik.ui.navigation.NavigationTab
 import com.apple.musik.ui.screens.HomeScreen
 import com.apple.musik.ui.screens.LibraryScreen
+import com.apple.musik.ui.screens.NowPlayingScreen
 import com.apple.musik.ui.screens.PermissionScreen
 import com.apple.musik.ui.screens.SearchScreen
 import com.apple.musik.ui.theme.AppleMusikTheme
 import com.apple.musik.ui.viewmodel.MusicViewModel
+import com.apple.musik.ui.viewmodel.PlayerViewModel
 
 /**
- * Main application navigation shell containing:
- * - Storage permission gatekeeper with friendly permission screen
- * - Real MediaStore / Room powered screens (Home, Library > Songs, Search)
- * - Floating mini player bar with 3 buttons (Previous, Play/Pause, Next)
- * - Bottom tab bar with active accent tinting
+ * Main application navigation shell with:
+ * - SharedTransitionLayout for Hero Artwork animation
+ * - Media3 PlayerViewModel connection
+ * - Live Mini Player expandable into Now Playing screen
+ * - Storage permission check with friendly UI
  */
+@OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 fun MainScreen(
     modifier: Modifier = Modifier,
-    viewModel: MusicViewModel = viewModel()
+    musicViewModel: MusicViewModel = viewModel(),
+    playerViewModel: PlayerViewModel = viewModel()
 ) {
     val context = LocalContext.current
     var selectedTab by remember { mutableStateOf(NavigationTab.Home) }
+    var isNowPlayingExpanded by remember { mutableStateOf(false) }
 
     val permissionToTest = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         Manifest.permission.READ_MEDIA_AUDIO
@@ -62,118 +76,165 @@ fun MainScreen(
 
     var permissionDismissed by remember { mutableStateOf(hasSystemPermission) }
 
-    val songs by viewModel.songs.collectAsState()
-    val recentlyAdded by viewModel.recentlyAdded.collectAsState()
-    val recentlyPlayed by viewModel.recentlyPlayed.collectAsState()
-    val activeSort by viewModel.sortOption.collectAsState()
+    val songs by musicViewModel.songs.collectAsState()
+    val recentlyAdded by musicViewModel.recentlyAdded.collectAsState()
+    val recentlyPlayed by musicViewModel.recentlyPlayed.collectAsState()
+    val activeSort by musicViewModel.sortOption.collectAsState()
 
-    var activeSong by remember { mutableStateOf<SongEntity?>(null) }
+    val currentSong by playerViewModel.currentSong.collectAsState()
+    val isPlaying by playerViewModel.isPlaying.collectAsState()
+    val currentPosition by playerViewModel.position.collectAsState()
+    val totalDuration by playerViewModel.duration.collectAsState()
 
-    // Set initial active song if none selected
-    LaunchedEffect(songs) {
-        if (activeSong == null && songs.isNotEmpty()) {
-            activeSong = songs.firstOrNull { it.title == "Slow Bloom" } ?: songs.first()
-        }
-    }
+    // Default song fallback for preview / initial state
+    val activeSong = currentSong ?: songs.firstOrNull { it.title == "Slow Bloom" } ?: songs.firstOrNull()
 
     // Check system permission on launch
     LaunchedEffect(Unit) {
         if (hasSystemPermission) {
-            viewModel.updatePermissionStatus(true)
+            musicViewModel.updatePermissionStatus(true)
         }
+    }
+
+    // Collapse Now Playing on system back button
+    BackHandler(enabled = isNowPlayingExpanded) {
+        isNowPlayingExpanded = false
     }
 
     if (!permissionDismissed && !hasSystemPermission) {
         PermissionScreen(
             onPermissionGranted = {
                 permissionDismissed = true
-                viewModel.updatePermissionStatus(true)
+                musicViewModel.updatePermissionStatus(true)
             },
             onSkip = {
                 permissionDismissed = true
-                viewModel.scanLocalMedia() // Seeds demo data
+                musicViewModel.scanLocalMedia()
             }
         )
     } else {
-        Box(
-            modifier = modifier
-                .fillMaxSize()
-                .background(AppleMusikTheme.colors.background)
-        ) {
-            // Active Screen Content (padded at bottom to avoid overlapping mini player + tab bar)
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(bottom = 136.dp)
-            ) {
-                Crossfade(
-                    targetState = selectedTab,
-                    label = "ScreenCrossfade"
-                ) { tab ->
-                    when (tab) {
-                        NavigationTab.Home -> {
-                            HomeScreen(
-                                recentlyAdded = if (recentlyAdded.isNotEmpty()) recentlyAdded else songs.take(6),
-                                recentlyPlayed = if (recentlyPlayed.isNotEmpty()) recentlyPlayed else songs.take(6),
-                                onSongClick = { activeSong = it }
+        SharedTransitionLayout {
+            AnimatedContent(
+                targetState = isNowPlayingExpanded,
+                transitionSpec = {
+                    if (targetState) {
+                        // Expanding: slide up from bottom + fade in
+                        (slideInVertically(
+                            animationSpec = tween(380),
+                            initialOffsetY = { it }
+                        ) + fadeIn(tween(320)))
+                            .togetherWith(
+                                fadeOut(tween(200))
                             )
+                    } else {
+                        // Collapsing: slide down to bottom + fade out
+                        fadeIn(tween(250))
+                            .togetherWith(
+                                slideOutVertically(
+                                    animationSpec = tween(320),
+                                    targetOffsetY = { it }
+                                ) + fadeOut(tween(250))
+                            )
+                    }
+                },
+                label = "NowPlayingHeroTransition"
+            ) { expanded ->
+                if (expanded) {
+                    NowPlayingScreen(
+                        song = activeSong,
+                        isPlaying = isPlaying,
+                        currentPosition = currentPosition,
+                        totalDuration = totalDuration,
+                        onPlayPauseClick = { playerViewModel.togglePlayPause() },
+                        onPreviousClick = { playerViewModel.skipToPrevious() },
+                        onNextClick = { playerViewModel.skipToNext() },
+                        onSeek = { playerViewModel.seekTo(it) },
+                        onCollapse = { isNowPlayingExpanded = false },
+                        sharedTransitionScope = this@SharedTransitionLayout,
+                        animatedVisibilityScope = this@AnimatedContent,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    Box(
+                        modifier = modifier
+                            .fillMaxSize()
+                            .background(AppleMusikTheme.colors.background)
+                    ) {
+                        // Active Screen Content (padded at bottom to avoid overlapping mini player + tab bar)
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(bottom = 136.dp)
+                        ) {
+                            Crossfade(
+                                targetState = selectedTab,
+                                label = "ScreenCrossfade"
+                            ) { tab ->
+                                when (tab) {
+                                    NavigationTab.Home -> {
+                                        HomeScreen(
+                                            recentlyAdded = if (recentlyAdded.isNotEmpty()) recentlyAdded else songs.take(6),
+                                            recentlyPlayed = if (recentlyPlayed.isNotEmpty()) recentlyPlayed else songs.take(6),
+                                            onSongClick = { song ->
+                                                playerViewModel.playSong(song, songs)
+                                            }
+                                        )
+                                    }
+
+                                    NavigationTab.Library -> {
+                                        LibraryScreen(
+                                            songs = songs,
+                                            activeSort = activeSort,
+                                            onSortOptionSelected = { musicViewModel.setSortOption(it) },
+                                            onSongClick = { song ->
+                                                playerViewModel.playSong(song, songs)
+                                            },
+                                            onPlayAllClick = {
+                                                playerViewModel.playAll(songs)
+                                            },
+                                            onShuffleClick = {
+                                                playerViewModel.shuffle(songs)
+                                            }
+                                        )
+                                    }
+
+                                    NavigationTab.Search -> {
+                                        SearchScreen(
+                                            songs = songs,
+                                            onSongClick = { song ->
+                                                playerViewModel.playSong(song, songs)
+                                            }
+                                        )
+                                    }
+                                }
+                            }
                         }
 
-                        NavigationTab.Library -> {
-                            LibraryScreen(
-                                songs = songs,
-                                activeSort = activeSort,
-                                onSortOptionSelected = { viewModel.setSortOption(it) },
-                                onSongClick = { activeSong = it }
+                        // Floating Mini Player & Bottom Navigation Tab Bar
+                        Column(
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .fillMaxWidth()
+                        ) {
+                            MiniPlayerBar(
+                                song = activeSong,
+                                isPlaying = isPlaying,
+                                onPreviousClick = { playerViewModel.skipToPrevious() },
+                                onPlayPauseClick = { playerViewModel.togglePlayPause() },
+                                onNextClick = { playerViewModel.skipToNext() },
+                                onClick = { isNowPlayingExpanded = true },
+                                sharedTransitionScope = this@SharedTransitionLayout,
+                                animatedVisibilityScope = this@AnimatedContent,
+                                modifier = Modifier.padding(bottom = 8.dp)
                             )
-                        }
 
-                        NavigationTab.Search -> {
-                            SearchScreen(
-                                songs = songs,
-                                onSongClick = { activeSong = it }
+                            BottomTabBar(
+                                selectedTab = selectedTab,
+                                onTabSelected = { selectedTab = it }
                             )
                         }
                     }
                 }
-            }
-
-            // Floating Mini Player & Bottom Navigation Tab Bar
-            Column(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-            ) {
-                // Floating Mini Player Bar with 3 controls: Previous, Play/Pause, Next
-                val displaySong = activeSong ?: songs.firstOrNull()
-                MiniPlayerBar(
-                    title = displaySong?.title ?: "Slow Bloom",
-                    artist = displaySong?.artist ?: "Aria Vale",
-                    albumArtUri = displaySong?.albumArtUri,
-                    modifier = Modifier.padding(bottom = 8.dp),
-                    onPreviousClick = {
-                        val currentIndex = songs.indexOf(activeSong)
-                        if (currentIndex > 0) {
-                            activeSong = songs[currentIndex - 1]
-                        } else if (songs.isNotEmpty()) {
-                            activeSong = songs.last()
-                        }
-                    },
-                    onNextClick = {
-                        val currentIndex = songs.indexOf(activeSong)
-                        if (currentIndex in 0 until songs.size - 1) {
-                            activeSong = songs[currentIndex + 1]
-                        } else if (songs.isNotEmpty()) {
-                            activeSong = songs.first()
-                        }
-                    }
-                )
-
-                // Bottom Navigation Tab Bar (3 tabs: Home, Library, Search)
-                BottomTabBar(
-                    selectedTab = selectedTab,
-                    onTabSelected = { selectedTab = it }
-                )
             }
         }
     }
