@@ -11,7 +11,7 @@ import androidx.room.RoomDatabase
         AlbumEntity::class,
         ArtistEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class MusicDatabase : RoomDatabase() {

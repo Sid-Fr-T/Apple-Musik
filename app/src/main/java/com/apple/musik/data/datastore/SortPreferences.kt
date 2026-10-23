@@ -12,7 +12,8 @@ val Context.dataStore by preferencesDataStore(name = "user_settings")
 enum class SortOption(val title: String, val headerText: String) {
     NAME_ASC("Name (A–Z)", "Sorted by Title"),
     MODIFIED_DATE("Modified Date", "Sorted by Modified Date"),
-    DATE_ADDED("Date Added", "Sorted by Date Added")
+    DATE_ADDED("Date Added", "Sorted by Date Added"),
+    FILE_PATH("File Path", "Sorted by File Path")
 }
 
 class SortPreferences(private val context: Context) {

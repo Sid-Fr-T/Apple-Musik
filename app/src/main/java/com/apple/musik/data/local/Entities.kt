@@ -13,7 +13,12 @@ data class SongEntity(
     val uri: String,
     val albumArtUri: String?,
     val dateAdded: Long,
-    val dateModified: Long
+    val dateModified: Long,
+    val path: String = "",
+    val trackNumber: Int = 0,
+    val year: Int = 0,
+    val genre: String = "",
+    val albumId: Long = 0L
 )
 
 @Entity(tableName = "albums")
@@ -23,7 +28,8 @@ data class AlbumEntity(
     val artist: String,
     val artworkUri: String?,
     val songCount: Int,
-    val year: Int = 0
+    val year: Int = 0,
+    val genre: String = ""
 )
 
 @Entity(tableName = "artists")

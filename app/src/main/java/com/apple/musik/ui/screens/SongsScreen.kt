@@ -89,10 +89,15 @@ fun SongsScreen(
 
     // Alphabet fast scroll index mapping
     val alphabet = remember { ('A'..'Z').toList() }
-    val letterPositions = remember(songs) {
+    val letterPositions = remember(songs, activeSort) {
         val map = mutableMapOf<Char, Int>()
         songs.forEachIndexed { index, song ->
-            val firstChar = song.title.firstOrNull()?.uppercaseChar() ?: '#'
+            val textToSort = if (activeSort == SortOption.FILE_PATH) {
+                song.path.substringAfterLast('/').ifEmpty { song.title }
+            } else {
+                song.title
+            }
+            val firstChar = textToSort.firstOrNull()?.uppercaseChar() ?: '#'
             if (firstChar in 'A'..'Z' && !map.containsKey(firstChar)) {
                 map[firstChar] = index
             }

@@ -47,6 +47,7 @@ fun HomeScreen(
     recentlyAdded: List<SongEntity>,
     recentlyPlayed: List<SongEntity>,
     onSongClick: (SongEntity) -> Unit = {},
+    onAlbumClick: (SongEntity) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     Box(
@@ -107,7 +108,7 @@ fun HomeScreen(
                     ) { song ->
                         AlbumCardItem(
                             song = song,
-                            onClick = { onSongClick(song) }
+                            onClick = { onAlbumClick(song) }
                         )
                     }
                 }

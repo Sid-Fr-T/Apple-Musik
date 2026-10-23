@@ -3,6 +3,7 @@ package com.apple.musik.data.scanner
 import android.content.ContentUris
 import android.content.Context
 import android.net.Uri
+import android.os.Build
 import android.provider.MediaStore
 import android.util.Log
 import com.apple.musik.data.local.AlbumEntity
@@ -23,7 +24,7 @@ class MediaScanner(private val context: Context) {
 
         val collection = MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
 
-        val projection = arrayOf(
+        val projectionList = mutableListOf(
             MediaStore.Audio.Media._ID,
             MediaStore.Audio.Media.TITLE,
             MediaStore.Audio.Media.ARTIST,
@@ -31,8 +32,15 @@ class MediaScanner(private val context: Context) {
             MediaStore.Audio.Media.ALBUM_ID,
             MediaStore.Audio.Media.DURATION,
             MediaStore.Audio.Media.DATE_ADDED,
-            MediaStore.Audio.Media.DATE_MODIFIED
+            MediaStore.Audio.Media.DATE_MODIFIED,
+            MediaStore.Audio.Media.DATA,
+            MediaStore.Audio.Media.TRACK,
+            MediaStore.Audio.Media.YEAR
         )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            projectionList.add(MediaStore.Audio.Media.GENRE)
+        }
+        val projection = projectionList.toTypedArray()
 
         val selection = "${MediaStore.Audio.Media.IS_MUSIC} != 0"
         val sortOrder = "${MediaStore.Audio.Media.TITLE} ASC"
@@ -53,6 +61,12 @@ class MediaScanner(private val context: Context) {
                 val durationColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
                 val dateAddedColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
                 val dateModifiedColumn = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_MODIFIED)
+                val pathColumn = cursor.getColumnIndex(MediaStore.Audio.Media.DATA)
+                val trackColumn = cursor.getColumnIndex(MediaStore.Audio.Media.TRACK)
+                val yearColumn = cursor.getColumnIndex(MediaStore.Audio.Media.YEAR)
+                val genreColumn = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    cursor.getColumnIndex(MediaStore.Audio.Media.GENRE)
+                } else -1
 
                 while (cursor.moveToNext()) {
                     val id = cursor.getLong(idColumn)
@@ -63,6 +77,11 @@ class MediaScanner(private val context: Context) {
                     val duration = cursor.getLong(durationColumn)
                     val dateAdded = cursor.getLong(dateAddedColumn)
                     val dateModified = cursor.getLong(dateModifiedColumn)
+                    val rawPath = if (pathColumn != -1) cursor.getString(pathColumn) else null
+                    val rawTrack = if (trackColumn != -1) cursor.getInt(trackColumn) else 0
+                    val trackNumber = if (rawTrack >= 1000) rawTrack % 1000 else rawTrack
+                    val year = if (yearColumn != -1) cursor.getInt(yearColumn) else 0
+                    val genre = if (genreColumn != -1) cursor.getString(genreColumn) ?: "" else ""
 
                     val uri = ContentUris.withAppendedId(
                         MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
@@ -74,6 +93,8 @@ class MediaScanner(private val context: Context) {
                         albumId
                     ).toString()
 
+                    val finalPath = rawPath?.ifEmpty { uri } ?: uri
+
                     val song = SongEntity(
                         id = id,
                         title = title,
@@ -83,7 +104,12 @@ class MediaScanner(private val context: Context) {
                         uri = uri,
                         albumArtUri = albumArtUri,
                         dateAdded = dateAdded,
-                        dateModified = dateModified
+                        dateModified = dateModified,
+                        path = finalPath,
+                        trackNumber = trackNumber,
+                        year = year,
+                        genre = genre,
+                        albumId = albumId
                     )
                     songsList.add(song)
 
@@ -94,11 +120,17 @@ class MediaScanner(private val context: Context) {
                             title = album,
                             artist = artist,
                             artworkUri = albumArtUri,
-                            songCount = 1
+                            songCount = 1,
+                            year = if (year > 0) year else 0,
+                            genre = genre
                         )
                     } else {
                         val current = albumsMap[albumId]!!
-                        albumsMap[albumId] = current.copy(songCount = current.songCount + 1)
+                        albumsMap[albumId] = current.copy(
+                            songCount = current.songCount + 1,
+                            year = if (current.year == 0 && year > 0) year else current.year,
+                            genre = if (current.genre.isEmpty() && genre.isNotEmpty()) genre else current.genre
+                        )
                     }
 
                     // Track artists
@@ -114,15 +146,17 @@ class MediaScanner(private val context: Context) {
             val demoSongs = getPdfDemoSongs()
             songsList.addAll(demoSongs)
 
-            demoSongs.forEachIndexed { index, song ->
-                val albumId = (index % 3 + 1).toLong()
+            demoSongs.forEach { song ->
+                val albumId = song.albumId
                 if (!albumsMap.containsKey(albumId)) {
                     albumsMap[albumId] = AlbumEntity(
                         id = albumId,
                         title = song.album,
                         artist = song.artist,
                         artworkUri = null,
-                        songCount = 1
+                        songCount = 1,
+                        year = song.year,
+                        genre = song.genre
                     )
                 } else {
                     val current = albumsMap[albumId]!!
@@ -161,7 +195,12 @@ class MediaScanner(private val context: Context) {
                 uri = "content://demo/1",
                 albumArtUri = null,
                 dateAdded = now - 5000,
-                dateModified = now - 2000
+                dateModified = now - 2000,
+                path = "/storage/emulated/0/Music/Aria Vale/Slow Bloom/01 - Glass Hours.mp3",
+                trackNumber = 1,
+                year = 2024,
+                genre = "Alternative",
+                albumId = 1L
             ),
             SongEntity(
                 id = 2,
@@ -172,7 +211,12 @@ class MediaScanner(private val context: Context) {
                 uri = "content://demo/2",
                 albumArtUri = null,
                 dateAdded = now - 8000,
-                dateModified = now - 4000
+                dateModified = now - 4000,
+                path = "/storage/emulated/0/Music/Juno Hart/Paper Planes/01 - Golden Static.mp3",
+                trackNumber = 1,
+                year = 2023,
+                genre = "Pop",
+                albumId = 2L
             ),
             SongEntity(
                 id = 3,
@@ -183,7 +227,12 @@ class MediaScanner(private val context: Context) {
                 uri = "content://demo/3",
                 albumArtUri = null,
                 dateAdded = now - 12000,
-                dateModified = now - 6000
+                dateModified = now - 6000,
+                path = "/storage/emulated/0/Music/Mira Sol/Low Light/01 - Low Light.mp3",
+                trackNumber = 1,
+                year = 2023,
+                genre = "R&B",
+                albumId = 3L
             ),
             SongEntity(
                 id = 4,
@@ -194,7 +243,12 @@ class MediaScanner(private val context: Context) {
                 uri = "content://demo/4",
                 albumArtUri = null,
                 dateAdded = now - 15000,
-                dateModified = now - 7000
+                dateModified = now - 7000,
+                path = "/storage/emulated/0/Music/The Parallels/Neon Tides/01 - Neon Tides.mp3",
+                trackNumber = 1,
+                year = 2024,
+                genre = "Electronic",
+                albumId = 4L
             ),
             SongEntity(
                 id = 5,
@@ -205,7 +259,12 @@ class MediaScanner(private val context: Context) {
                 uri = "content://demo/5",
                 albumArtUri = null,
                 dateAdded = now - 20000,
-                dateModified = now - 9000
+                dateModified = now - 9000,
+                path = "/storage/emulated/0/Music/Ezra Kane/Quiet Orbit/01 - Quiet Orbit.mp3",
+                trackNumber = 1,
+                year = 2022,
+                genre = "Ambient",
+                albumId = 5L
             ),
             SongEntity(
                 id = 6,
@@ -216,7 +275,12 @@ class MediaScanner(private val context: Context) {
                 uri = "content://demo/6",
                 albumArtUri = null,
                 dateAdded = now - 25000,
-                dateModified = now - 1000
+                dateModified = now - 1000,
+                path = "/storage/emulated/0/Music/Aria Vale/Slow Bloom/02 - Slow Bloom.mp3",
+                trackNumber = 2,
+                year = 2024,
+                genre = "Alternative",
+                albumId = 1L
             ),
             SongEntity(
                 id = 7,
@@ -227,7 +291,12 @@ class MediaScanner(private val context: Context) {
                 uri = "content://demo/7",
                 albumArtUri = null,
                 dateAdded = now - 30000,
-                dateModified = now - 11000
+                dateModified = now - 11000,
+                path = "/storage/emulated/0/Music/The Parallels/Neon Tides/02 - Tidal.mp3",
+                trackNumber = 2,
+                year = 2024,
+                genre = "Electronic",
+                albumId = 4L
             ),
             SongEntity(
                 id = 8,
@@ -238,7 +307,12 @@ class MediaScanner(private val context: Context) {
                 uri = "content://demo/8",
                 albumArtUri = null,
                 dateAdded = now - 35000,
-                dateModified = now - 15000
+                dateModified = now - 15000,
+                path = "/storage/emulated/0/Music/Aria Vale/Slow Bloom/03 - Paper Light.mp3",
+                trackNumber = 3,
+                year = 2024,
+                genre = "Alternative",
+                albumId = 1L
             ),
             SongEntity(
                 id = 9,
@@ -249,7 +323,12 @@ class MediaScanner(private val context: Context) {
                 uri = "content://demo/9",
                 albumArtUri = null,
                 dateAdded = now - 40000,
-                dateModified = now - 18000
+                dateModified = now - 18000,
+                path = "/storage/emulated/0/Music/Aria Vale/Slow Bloom/04 - Evening Static.mp3",
+                trackNumber = 4,
+                year = 2024,
+                genre = "Alternative",
+                albumId = 1L
             )
         )
     }

@@ -4,6 +4,7 @@ import android.content.Context
 import com.apple.musik.data.datastore.SortOption
 import com.apple.musik.data.datastore.SortPreferences
 import com.apple.musik.data.local.AlbumEntity
+import com.apple.musik.data.local.ArtistEntity
 import com.apple.musik.data.local.MusicDatabase
 import com.apple.musik.data.local.SongEntity
 import com.apple.musik.data.scanner.MediaScanner
@@ -25,6 +26,7 @@ class MusicRepository(private val context: Context) {
             SortOption.NAME_ASC -> db.songDao().getSongsSortedByName()
             SortOption.MODIFIED_DATE -> db.songDao().getSongsSortedByModifiedDate()
             SortOption.DATE_ADDED -> db.songDao().getSongsSortedByDateAdded()
+            SortOption.FILE_PATH -> db.songDao().getSongsSortedByPath()
         }
     }
 
@@ -33,6 +35,8 @@ class MusicRepository(private val context: Context) {
     val recentlyPlayedSongs: Flow<List<SongEntity>> = db.songDao().getRecentlyPlayedSongs()
 
     val albums: Flow<List<AlbumEntity>> = db.albumDao().getAllAlbums()
+
+    val artists: Flow<List<ArtistEntity>> = db.artistDao().getAllArtists()
 
     val songCount: Flow<Int> = db.songDao().getSongCount()
 
@@ -43,4 +47,18 @@ class MusicRepository(private val context: Context) {
     suspend fun scanMedia(): Int {
         return mediaScanner.scanMedia()
     }
+
+    fun searchSongs(query: String): Flow<List<SongEntity>> = db.songDao().searchSongs(query)
+
+    fun searchAlbums(query: String): Flow<List<AlbumEntity>> = db.albumDao().searchAlbums(query)
+
+    fun searchArtists(query: String): Flow<List<ArtistEntity>> = db.artistDao().searchArtists(query)
+
+    fun getSongsForAlbum(albumName: String): Flow<List<SongEntity>> = db.songDao().getSongsForAlbum(albumName)
+
+    fun getSongsForArtist(artistName: String): Flow<List<SongEntity>> = db.songDao().getSongsForArtist(artistName)
+
+    fun getAlbumByName(albumName: String): Flow<AlbumEntity?> = db.albumDao().getAlbumByName(albumName)
+
+    fun getAlbumById(albumId: Long): Flow<AlbumEntity?> = db.albumDao().getAlbumById(albumId)
 }

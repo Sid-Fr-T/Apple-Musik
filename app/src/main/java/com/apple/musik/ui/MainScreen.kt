@@ -37,9 +37,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.apple.musik.data.local.AlbumEntity
 import com.apple.musik.ui.components.BottomTabBar
 import com.apple.musik.ui.components.MiniPlayerBar
 import com.apple.musik.ui.navigation.NavigationTab
+import com.apple.musik.ui.screens.AlbumDetailScreen
 import com.apple.musik.ui.screens.HomeScreen
 import com.apple.musik.ui.screens.LibraryScreen
 import com.apple.musik.ui.screens.NowPlayingScreen
@@ -49,6 +51,7 @@ import com.apple.musik.ui.screens.SearchScreen
 import com.apple.musik.ui.theme.AppleMusikTheme
 import com.apple.musik.ui.viewmodel.MusicViewModel
 import com.apple.musik.ui.viewmodel.PlayerViewModel
+import kotlinx.coroutines.flow.flowOf
 
 /**
  * Main application navigation shell with:
@@ -68,6 +71,7 @@ fun MainScreen(
     var selectedTab by remember { mutableStateOf(NavigationTab.Home) }
     var isNowPlayingExpanded by remember { mutableStateOf(false) }
     var isQueueOpen by remember { mutableStateOf(false) }
+    var selectedAlbum by remember { mutableStateOf<AlbumEntity?>(null) }
 
     val permissionToTest = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         Manifest.permission.READ_MEDIA_AUDIO
@@ -83,9 +87,29 @@ fun MainScreen(
     var permissionDismissed by remember { mutableStateOf(hasSystemPermission) }
 
     val songs by musicViewModel.songs.collectAsState()
+    val albums by musicViewModel.albums.collectAsState()
     val recentlyAdded by musicViewModel.recentlyAdded.collectAsState()
     val recentlyPlayed by musicViewModel.recentlyPlayed.collectAsState()
     val activeSort by musicViewModel.sortOption.collectAsState()
+
+    val searchQuery by musicViewModel.searchQuery.collectAsState()
+    val searchSongs by musicViewModel.searchSongs.collectAsState()
+    val searchAlbums by musicViewModel.searchAlbums.collectAsState()
+    val searchArtists by musicViewModel.searchArtists.collectAsState()
+
+    val albumSongs by remember(selectedAlbum) {
+        val title = selectedAlbum?.title
+        if (title != null) musicViewModel.getSongsForAlbum(title)
+        else flowOf(emptyList())
+    }.collectAsState(initial = emptyList())
+
+    val displayAlbumSongs = remember(albumSongs, selectedAlbum, songs) {
+        if (albumSongs.isNotEmpty()) {
+            albumSongs
+        } else {
+            songs.filter { it.album.equals(selectedAlbum?.title, ignoreCase = true) }
+        }
+    }
 
     val currentSong by playerViewModel.currentSong.collectAsState()
     val isPlaying by playerViewModel.isPlaying.collectAsState()
@@ -125,6 +149,10 @@ fun MainScreen(
 
     BackHandler(enabled = isNowPlayingExpanded && !isQueueOpen) {
         isNowPlayingExpanded = false
+    }
+
+    BackHandler(enabled = selectedAlbum != null && !isNowPlayingExpanded && !isQueueOpen) {
+        selectedAlbum = null
     }
 
     if (!permissionDismissed && !hasSystemPermission) {
@@ -243,45 +271,90 @@ fun MainScreen(
                                 .fillMaxSize()
                                 .padding(bottom = 136.dp)
                         ) {
-                            Crossfade(
-                                targetState = selectedTab,
-                                label = "ScreenCrossfade"
-                            ) { tab ->
-                                when (tab) {
-                                    NavigationTab.Home -> {
-                                        HomeScreen(
-                                            recentlyAdded = if (recentlyAdded.isNotEmpty()) recentlyAdded else songs.take(6),
-                                            recentlyPlayed = if (recentlyPlayed.isNotEmpty()) recentlyPlayed else songs.take(6),
-                                            onSongClick = { song ->
-                                                playerViewModel.playSong(song, songs)
-                                            }
-                                        )
+                            if (selectedAlbum != null) {
+                                val currentAlbum = selectedAlbum!!
+                                AlbumDetailScreen(
+                                    album = currentAlbum,
+                                    tracks = displayAlbumSongs,
+                                    currentSong = activeSong,
+                                    onBackClick = { selectedAlbum = null },
+                                    onTrackClick = { track, trackList ->
+                                        playerViewModel.playSong(track, trackList)
+                                    },
+                                    onPlayAllClick = { trackList ->
+                                        playerViewModel.playAll(trackList)
+                                    },
+                                    onShuffleClick = { trackList ->
+                                        playerViewModel.shuffle(trackList)
                                     }
+                                )
+                            } else {
+                                Crossfade(
+                                    targetState = selectedTab,
+                                    label = "ScreenCrossfade"
+                                ) { tab ->
+                                    when (tab) {
+                                        NavigationTab.Home -> {
+                                            HomeScreen(
+                                                recentlyAdded = if (recentlyAdded.isNotEmpty()) recentlyAdded else songs.take(6),
+                                                recentlyPlayed = if (recentlyPlayed.isNotEmpty()) recentlyPlayed else songs.take(6),
+                                                onSongClick = { song ->
+                                                    playerViewModel.playSong(song, songs)
+                                                },
+                                                onAlbumClick = { song ->
+                                                    val match = albums.firstOrNull { it.title.equals(song.album, ignoreCase = true) }
+                                                        ?: AlbumEntity(
+                                                            id = if (song.albumId != 0L) song.albumId else song.id,
+                                                            title = song.album.ifEmpty { song.title },
+                                                            artist = song.artist,
+                                                            artworkUri = song.albumArtUri,
+                                                            songCount = 1,
+                                                            year = song.year,
+                                                            genre = song.genre
+                                                        )
+                                                    selectedAlbum = match
+                                                }
+                                            )
+                                        }
 
-                                    NavigationTab.Library -> {
-                                        LibraryScreen(
-                                            songs = songs,
-                                            activeSort = activeSort,
-                                            onSortOptionSelected = { musicViewModel.setSortOption(it) },
-                                            onSongClick = { song ->
-                                                playerViewModel.playSong(song, songs)
-                                            },
-                                            onPlayAllClick = {
-                                                playerViewModel.playAll(songs)
-                                            },
-                                            onShuffleClick = {
-                                                playerViewModel.shuffle(songs)
-                                            }
-                                        )
-                                    }
+                                        NavigationTab.Library -> {
+                                            LibraryScreen(
+                                                songs = songs,
+                                                activeSort = activeSort,
+                                                onSortOptionSelected = { musicViewModel.setSortOption(it) },
+                                                onSongClick = { song ->
+                                                    playerViewModel.playSong(song, songs)
+                                                },
+                                                onPlayAllClick = {
+                                                    playerViewModel.playAll(songs)
+                                                },
+                                                onShuffleClick = {
+                                                    playerViewModel.shuffle(songs)
+                                                }
+                                            )
+                                        }
 
-                                    NavigationTab.Search -> {
-                                        SearchScreen(
-                                            songs = songs,
-                                            onSongClick = { song ->
-                                                playerViewModel.playSong(song, songs)
-                                            }
-                                        )
+                                        NavigationTab.Search -> {
+                                            SearchScreen(
+                                                searchQuery = searchQuery,
+                                                onQueryChange = { musicViewModel.onSearchQueryChanged(it) },
+                                                songs = searchSongs,
+                                                albums = searchAlbums,
+                                                artists = searchArtists,
+                                                onSongClick = { song, queueList ->
+                                                    playerViewModel.playSong(song, queueList)
+                                                },
+                                                onAlbumClick = { album ->
+                                                    selectedAlbum = album
+                                                },
+                                                onArtistClick = { artist ->
+                                                    val artistTracks = songs.filter { it.artist.equals(artist.name, ignoreCase = true) }
+                                                    if (artistTracks.isNotEmpty()) {
+                                                        playerViewModel.playAll(artistTracks)
+                                                    }
+                                                }
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -307,7 +380,10 @@ fun MainScreen(
 
                             BottomTabBar(
                                 selectedTab = selectedTab,
-                                onTabSelected = { selectedTab = it }
+                                onTabSelected = {
+                                    selectedTab = it
+                                    selectedAlbum = null
+                                }
                             )
                         }
                     }
