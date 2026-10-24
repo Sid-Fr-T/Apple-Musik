@@ -1,6 +1,8 @@
 package com.apple.musik.ui.components
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -26,6 +28,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
@@ -78,7 +81,20 @@ fun BottomTabBar(
                     } else {
                         AppleMusikTheme.colors.secondaryText
                     },
+                    animationSpec = spring(
+                        dampingRatio = 0.8f,
+                        stiffness = 350f
+                    ),
                     label = "tabColor"
+                )
+
+                val tabScale by animateFloatAsState(
+                    targetValue = if (isSelected) 1.0f else 0.92f,
+                    animationSpec = spring(
+                        dampingRatio = 0.62f,
+                        stiffness = 380f
+                    ),
+                    label = "tabScale"
                 )
 
                 Box(
@@ -94,7 +110,8 @@ fun BottomTabBar(
                 ) {
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center
+                        verticalArrangement = Arrangement.Center,
+                        modifier = Modifier.scale(tabScale)
                     ) {
                         when (tab) {
                             NavigationTab.Home -> {

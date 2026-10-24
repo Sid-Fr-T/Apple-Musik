@@ -137,7 +137,8 @@ fun AlbumDetailScreen(
                             albumArtUri = album.artworkUri ?: tracks.firstOrNull()?.albumArtUri,
                             title = album.title,
                             modifier = Modifier.size(230.dp),
-                            shape = RoundedCornerShape(20.dp)
+                            shape = RoundedCornerShape(20.dp),
+                            highQuality = true
                         )
                     }
                 }

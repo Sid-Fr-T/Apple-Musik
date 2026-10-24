@@ -228,17 +228,16 @@ class PlaybackManager private constructor(private val context: Context) {
     }
 
     private fun toMediaItem(song: SongEntity): MediaItem {
-        val metadata = MediaMetadata.Builder()
+        val metadataBuilder = MediaMetadata.Builder()
             .setTitle(song.title)
             .setArtist(song.artist)
             .setAlbumTitle(song.album)
             .setArtworkUri(song.albumArtUri?.let { Uri.parse(it) })
-            .build()
 
         return MediaItem.Builder()
             .setMediaId(song.id.toString())
             .setUri(Uri.parse(song.uri))
-            .setMediaMetadata(metadata)
+            .setMediaMetadata(metadataBuilder.build())
             .build()
     }
 

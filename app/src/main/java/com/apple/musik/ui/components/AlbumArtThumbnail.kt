@@ -16,7 +16,10 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import coil.request.CachePolicy
 import coil.request.ImageRequest
+import coil.size.Precision
+import coil.size.Size
 import kotlin.math.absoluteValue
 
 // PDF Art Palettes
@@ -38,16 +41,18 @@ fun getArtPaletteFor(seed: String): Pair<Color, Color> {
 
 /**
  * Highly optimized album art renderer:
- * - Uses ImageRequest with crossfade for smooth image loading.
- * - Draws abstract geometry directly on background via drawBehind,
- *   reducing Compose layout tree node count for every list item.
+ * - Always draws geometric abstract art directly in drawBehind as instant zero-cost fallback.
+ * - Samples & downsamples real images via Coil with INEXACT precision (inSampleSize),
+ *   eliminating GC jitter and dropped frames on first open.
+ * - Hardware bitmap memory & disk cache enabled.
  */
 @Composable
 fun AlbumArtThumbnail(
     albumArtUri: String?,
     title: String,
     modifier: Modifier = Modifier,
-    shape: Shape = RoundedCornerShape(10.dp)
+    shape: Shape = RoundedCornerShape(10.dp),
+    highQuality: Boolean = false
 ) {
     val context = LocalContext.current
     val (primaryColor, circleColor) = remember(title) { getArtPaletteFor(title) }
@@ -60,26 +65,36 @@ fun AlbumArtThumbnail(
             .clip(shape)
             .background(primaryColor)
             .drawBehind {
-                if (!isRealImage) {
-                    val radius = size.minDimension * 0.65f
-                    val centerOffset = Offset(
-                        x = size.width * 0.85f,
-                        y = size.height * 0.85f
-                    )
-                    drawCircle(
-                        color = circleColor,
-                        radius = radius,
-                        center = centerOffset
-                    )
-                }
+                val radius = size.minDimension * 0.65f
+                val centerOffset = Offset(
+                    x = size.width * 0.85f,
+                    y = size.height * 0.85f
+                )
+                drawCircle(
+                    color = circleColor,
+                    radius = radius,
+                    center = centerOffset
+                )
             }
     ) {
         if (isRealImage) {
-            val imageRequest = remember(albumArtUri) {
-                ImageRequest.Builder(context)
+            val imageRequest = remember(albumArtUri, highQuality) {
+                val builder = ImageRequest.Builder(context)
                     .data(albumArtUri)
-                    .crossfade(200)
-                    .build()
+                    .crossfade(true)
+                    .memoryCachePolicy(CachePolicy.ENABLED)
+                    .diskCachePolicy(CachePolicy.ENABLED)
+
+                if (highQuality) {
+                    builder
+                        .size(Size(1024, 1024))
+                        .precision(Precision.AUTOMATIC)
+                } else {
+                    builder
+                        .size(Size(384, 384))
+                        .precision(Precision.INEXACT)
+                }
+                builder.build()
             }
             AsyncImage(
                 model = imageRequest,

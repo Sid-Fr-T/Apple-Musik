@@ -6,6 +6,7 @@ import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -55,6 +56,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -116,25 +118,20 @@ fun NowPlayingScreen(
         albumArtUri = albumArtUri
     )
 
-    // Cached ambient glow brush
-    val radialGlowBrush = remember(dominantColor) {
-        Brush.radialGradient(
-            colors = listOf(
-                dominantColor.copy(alpha = 0.55f),
-                dominantColor.copy(alpha = 0.22f),
-                Color.Transparent
-            )
-        )
-    }
-
     // Spring-animated vertical drag-to-dismiss gesture
     val dragAnimatable = remember { Animatable(0f) }
 
     // Volume state via AudioManager
     val audioManager = remember { context.getSystemService(Context.AUDIO_SERVICE) as AudioManager }
-    val maxVolume = remember { audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC).toFloat() }
+    val maxVolume = remember {
+        val max = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC).toFloat()
+        if (max > 0f) max else 15f
+    }
     val currentVolume = remember { audioManager.getStreamVolume(AudioManager.STREAM_MUSIC).toFloat() }
-    var volumeFraction by remember { mutableFloatStateOf((currentVolume / maxVolume).coerceIn(0f, 1f)) }
+    var volumeFraction by remember {
+        val initialFrac = if (maxVolume > 0f) (currentVolume / maxVolume) else 0.5f
+        mutableFloatStateOf(if (initialFrac.isNaN()) 0.5f else initialFrac.coerceIn(0f, 1f))
+    }
 
     // Scrubber dragging state
     var isDraggingScrubber by remember { mutableStateOf(false) }
@@ -142,8 +139,29 @@ fun NowPlayingScreen(
 
     val duration = totalDuration.takeIf { it > 0 } ?: (song?.duration?.takeIf { it > 0 } ?: 201_000L)
     val effectivePosition = if (isDraggingScrubber) dragPositionMs.toLong() else currentPosition
-    val progressFraction = (effectivePosition.toFloat() / duration.toFloat()).coerceIn(0f, 1f)
+    val progressFraction = if (duration > 0) {
+        val rawFrac = effectivePosition.toFloat() / duration.toFloat()
+        if (rawFrac.isNaN()) 0f else rawFrac.coerceIn(0f, 1f)
+    } else 0f
     val remainingMs = (duration - effectivePosition).coerceAtLeast(0L)
+
+    val artworkScale by animateFloatAsState(
+        targetValue = if (isPlaying) 1.0f else 0.88f,
+        animationSpec = spring(
+            dampingRatio = 0.70f,
+            stiffness = 320f
+        ),
+        label = "ArtworkPlaybackScale"
+    )
+
+    val playPauseButtonScale by animateFloatAsState(
+        targetValue = if (isPlaying) 1.05f else 1.0f,
+        animationSpec = spring(
+            dampingRatio = 0.65f,
+            stiffness = 400f
+        ),
+        label = "PlayPauseButtonScale"
+    )
 
     Box(
         modifier = modifier
@@ -152,15 +170,18 @@ fun NowPlayingScreen(
             .pointerInput(Unit) {
                 detectVerticalDragGestures(
                     onDragEnd = {
-                        if (dragAnimatable.value > 130f) {
-                            onCollapse()
+                        if (dragAnimatable.value > 120f) {
+                            coroutineScope.launch {
+                                dragAnimatable.animateTo(0f, spring(0.78f, 360f))
+                                onCollapse()
+                            }
                         } else {
                             coroutineScope.launch {
                                 dragAnimatable.animateTo(
                                     targetValue = 0f,
                                     animationSpec = spring(
-                                        dampingRatio = 0.8f,
-                                        stiffness = 450f
+                                        dampingRatio = 0.78f,
+                                        stiffness = 380f
                                     )
                                 )
                             }
@@ -168,7 +189,7 @@ fun NowPlayingScreen(
                     },
                     onDragCancel = {
                         coroutineScope.launch {
-                            dragAnimatable.animateTo(0f, spring(0.8f, 450f))
+                            dragAnimatable.animateTo(0f, spring(0.78f, 380f))
                         }
                     },
                     onVerticalDrag = { _, dragAmount ->
@@ -182,10 +203,31 @@ fun NowPlayingScreen(
             }
             .background(AppleMusikTheme.colors.background)
             .drawBehind {
-                drawCircle(
-                    brush = radialGlowBrush,
-                    center = Offset(size.width * 0.5f, size.height * 0.28f),
-                    radius = size.width * 0.95f
+                val glowCenter = Offset(size.width * 0.5f, size.height * 0.26f)
+                val glowRadius = size.height * 0.70f
+
+                // Smooth radial atmospheric glow diffused seamlessly all around with zero hard geometric borders
+                drawRect(
+                    brush = Brush.radialGradient(
+                        0.0f to dominantColor.copy(alpha = 0.50f),
+                        0.25f to dominantColor.copy(alpha = 0.30f),
+                        0.50f to dominantColor.copy(alpha = 0.12f),
+                        0.75f to dominantColor.copy(alpha = 0.03f),
+                        1.0f to Color.Transparent,
+                        center = glowCenter,
+                        radius = glowRadius
+                    )
+                )
+
+                // Soft top-down vertical ambient wash
+                drawRect(
+                    brush = Brush.verticalGradient(
+                        0.0f to dominantColor.copy(alpha = 0.18f),
+                        0.40f to dominantColor.copy(alpha = 0.05f),
+                        0.70f to Color.Transparent,
+                        startY = 0f,
+                        endY = size.height * 0.70f
+                    )
                 )
             }
     ) {
@@ -229,11 +271,12 @@ fun NowPlayingScreen(
                     .fillMaxWidth()
                     .padding(horizontal = 4.dp)
                     .aspectRatio(1f)
+                    .scale(artworkScale)
                     .shadow(
-                        elevation = 20.dp,
+                        elevation = if (isPlaying) 24.dp else 10.dp,
                         shape = RoundedCornerShape(28.dp),
-                        spotColor = Color.Black.copy(alpha = 0.6f),
-                        ambientColor = Color.Black.copy(alpha = 0.3f)
+                        spotColor = Color.Black.copy(alpha = 0.65f),
+                        ambientColor = Color.Black.copy(alpha = 0.35f)
                     )
                     .then(heroArtModifier)
             ) {
@@ -241,7 +284,8 @@ fun NowPlayingScreen(
                     albumArtUri = albumArtUri,
                     title = title,
                     modifier = Modifier.fillMaxSize(),
-                    shape = RoundedCornerShape(28.dp)
+                    shape = RoundedCornerShape(28.dp),
+                    highQuality = true
                 )
             }
 
@@ -359,7 +403,9 @@ fun NowPlayingScreen(
 
                 IconButton(
                     onClick = onPlayPauseClick,
-                    modifier = Modifier.size(72.dp)
+                    modifier = Modifier
+                        .size(72.dp)
+                        .scale(playPauseButtonScale)
                 ) {
                     Icon(
                         imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
@@ -494,20 +540,23 @@ fun CustomThinProgressBar(
             .onGloballyPositioned { widthPx = it.size.width.toFloat().coerceAtLeast(1f) }
             .pointerInput(Unit) {
                 detectTapGestures { offset ->
-                    val frac = (offset.x / widthPx).coerceIn(0f, 1f)
+                    val rawFrac = if (widthPx > 0f) offset.x / widthPx else 0f
+                    val frac = if (rawFrac.isNaN()) 0f else rawFrac.coerceIn(0f, 1f)
                     onSeekFraction(frac)
                 }
             }
             .pointerInput(Unit) {
                 detectHorizontalDragGestures(
                     onDragStart = { offset ->
-                        val frac = (offset.x / widthPx).coerceIn(0f, 1f)
+                        val rawFrac = if (widthPx > 0f) offset.x / widthPx else 0f
+                        val frac = if (rawFrac.isNaN()) 0f else rawFrac.coerceIn(0f, 1f)
                         onDragFraction(frac)
                     },
                     onDragEnd = { onDragFinished() },
                     onDragCancel = { onDragFinished() },
                     onHorizontalDrag = { change, _ ->
-                        val frac = (change.position.x / widthPx).coerceIn(0f, 1f)
+                        val rawFrac = if (widthPx > 0f) change.position.x / widthPx else 0f
+                        val frac = if (rawFrac.isNaN()) 0f else rawFrac.coerceIn(0f, 1f)
                         onDragFraction(frac)
                     }
                 )
@@ -524,13 +573,16 @@ fun CustomThinProgressBar(
         )
 
         // Active Track
-        Box(
-            modifier = Modifier
-                .fillMaxWidth(fraction = progressFraction)
-                .height(4.dp)
-                .clip(RoundedCornerShape(2.dp))
-                .background(Color.White)
-        )
+        val safeFraction = if (progressFraction.isNaN()) 0f else progressFraction.coerceIn(0f, 1f)
+        if (safeFraction > 0.001f) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(fraction = safeFraction)
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(Color.White)
+            )
+        }
     }
 }
 

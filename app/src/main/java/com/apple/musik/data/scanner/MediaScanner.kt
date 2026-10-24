@@ -88,6 +88,12 @@ class MediaScanner(private val context: Context) {
                         id
                     ).toString()
 
+                    // Unique artwork URI for each individual song to guarantee separate embedded artwork
+                    val songArtworkUri = ContentUris.withAppendedId(
+                        Uri.parse("content://com.apple.musik.artwork/song"),
+                        id
+                    ).toString()
+
                     val albumArtUri = ContentUris.withAppendedId(
                         Uri.parse("content://media/external/audio/albumart"),
                         albumId
@@ -102,7 +108,7 @@ class MediaScanner(private val context: Context) {
                         album = album,
                         duration = duration,
                         uri = uri,
-                        albumArtUri = albumArtUri,
+                        albumArtUri = songArtworkUri,
                         dateAdded = dateAdded,
                         dateModified = dateModified,
                         path = finalPath,
@@ -176,9 +182,14 @@ class MediaScanner(private val context: Context) {
             )
         }
 
-        db.songDao().insertSongs(songsList)
-        db.albumDao().insertAlbums(albumsMap.values.toList())
-        db.artistDao().insertArtists(artistEntities)
+        if (songsList.isNotEmpty()) {
+            db.songDao().deleteAllSongs()
+            db.songDao().insertSongs(songsList)
+            db.albumDao().deleteAllAlbums()
+            db.albumDao().insertAlbums(albumsMap.values.toList())
+            db.artistDao().deleteAllArtists()
+            db.artistDao().insertArtists(artistEntities)
+        }
 
         songsList.size
     }
